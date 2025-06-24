@@ -31,7 +31,11 @@ class AprilTagDetectorNode(Node):
             self.camera_info_callback,
             10)
         self.pose_pub = self.create_publisher(PoseStamped, '/apriltag/pose', 10)
+        self.last_tag_transforms = {}
         self.tf_broadcaster = TransformBroadcaster(self)
+        self.broadcast_timer = self.create_timer(
+            0.1,
+            self.broadcast_all_tag_transforms)
 
     def camera_info_callback(self, msg):
         if self.camera_matrix is None:  # Only process once
@@ -58,10 +62,10 @@ class AprilTagDetectorNode(Node):
         detections = self.detector.detect(gray, estimate_tag_pose=True, camera_params=(fx, fy, cx, cy), tag_size=0.05)
 
         for det in detections:
-            print(f"Detected AprilTag ID: {det.tag_id}")
+            #print(f"Detected AprilTag ID: {det.tag_id}")
             if det.pose_t is None:  # Skip invalid poses
                 continue
-            print("Pose detected!")
+            #print("Pose detected!")
             pose_msg = PoseStamped()
             pose_msg.header = msg.header
             pose_msg.pose.position.x = det.pose_t[0][0]
@@ -74,8 +78,14 @@ class AprilTagDetectorNode(Node):
             self.pose_pub.publish(pose_msg)
 
             # Convert rotation matrix to quaternion
+            M = np.array([
+                [0,  0,  1],
+                [-1, 0,  0],
+                [0, -1,  0]
+            ])
             rotation_matrix = np.eye(4)
-            rotation_matrix[:3, :3] = det.pose_R
+            rotation_matrix3x3 = M @ det.pose_R @ np.linalg.inv(M)
+            rotation_matrix[:3, :3] = rotation_matrix3x3
             q = tf_transformations.quaternion_from_matrix(rotation_matrix)
             t = TransformStamped()
             t.header.stamp = msg.header.stamp
@@ -84,10 +94,21 @@ class AprilTagDetectorNode(Node):
             t.transform.translation.x = det.pose_t[2][0]
             t.transform.translation.y = -det.pose_t[0][0]
             t.transform.translation.z = -det.pose_t[1][0]
-            t.transform.rotation.x = 0.0
-            t.transform.rotation.y = 0.0
-            t.transform.rotation.z = 0.0
-            t.transform.rotation.w = 1.0
+            qx, qy, qz, qw = q
+            t.transform.rotation.x = qx
+            t.transform.rotation.y = qy
+            t.transform.rotation.z = qz
+            t.transform.rotation.w = qw
+            self.last_tag_transforms[det.tag_id] = t
+            print(f"Detected tag ID: {det.tag_id}")
+            print(f"  Position: x={t.transform.translation.x:.3f}, y={t.transform.translation.y:.3f}, z={t.transform.translation.z:.3f}")
+            print(f"  Orientation (quaternion): x={qx:.3f}, y={qy:.3f}, z={qz:.3f}, w={qw:.3f}")
+            #self.tf_broadcaster.sendTransform(t)
+
+    def broadcast_all_tag_transforms(self):
+        now = self.get_clock().now().to_msg()
+        for tag_id, t in self.last_tag_transforms.items():
+            t.header.stamp = now
             self.tf_broadcaster.sendTransform(t)
 
 def main(args=None):
