@@ -17,7 +17,10 @@ def generate_launch_description():
         ),
         launch_arguments={
             'camera_model': 'zed2i',
-            'name': 'zed2i'
+            'name': 'zed2i',
+            'pos_tracking.publish_tf' : 'false',
+            'pos_tracking.publish_map_tf' : 'false',
+            'publish_tf' : 'false'
         }.items()
     )
 
